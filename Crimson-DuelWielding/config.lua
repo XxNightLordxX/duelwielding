@@ -135,11 +135,6 @@ Config.UseGangAnimation = true
 -- 'MP_F_Freemode', 'Ballistic'.
 Config.AnimationStyle = 'Gang1H'
 
--- Re-apply the style this often, in ms, while dual wielding. Other resources
--- and weapon switches reset the ped's animation override, which is what makes
--- the hands snap back together mid-fight. 0 disables re-applying.
-Config.AnimationRefresh = 1000
-
 -- Left-hand attachment. Tuned for standard pistol models.
 -- If the gun sits through the palm, nudge these. A prop aligner such as
 -- noted_propattacher will print exact values for a specific model.
@@ -148,11 +143,6 @@ Config.Attach = {
     pos  = vec3(0.12, 0.03, 0.02),
     rot  = vec3(-75.0, 5.0, -5.0),
 }
-
--- Set true, restart, and use /dwtune while dual wielding to drag the offhand
--- gun into place with the keyboard. It prints a ready-to-paste Config.Attach
--- block. This is far faster than editing numbers and restarting each time.
-Config.Debug = false
 
 -- ----------------------------------------------------------------------------
 -- NOTIFICATIONS
