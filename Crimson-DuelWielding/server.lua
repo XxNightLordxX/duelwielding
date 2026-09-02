@@ -100,20 +100,48 @@ end
 -- that are not the gun already in their hand.
 -- ----------------------------------------------------------------------------
 
+-- ox_inventory:Search returns TWO different shapes, decided by how many item
+-- names you asked for:
+--     modules/inventory/server.lua
+--     if next(returnData) then return itemCount == 1 and returnData[items[1]] or returnData end
+-- One name  -> a flat array of slot tables.
+-- Many names -> a map keyed by item name, each value an array of slot tables.
+-- A server whose allow-list has exactly one weapon hits the first shape, so both
+-- must be handled. Flatten to a plain list of slots either way.
+local function flattenSearch(res)
+    local out = {}
+    if type(res) ~= 'table' then return out end
+
+    for _, v in pairs(res) do
+        if type(v) == 'table' then
+            if v.slot and v.name then
+                out[#out + 1] = v                       -- flat array shape
+            else
+                for _, slot in pairs(v) do              -- keyed map shape
+                    if type(slot) == 'table' and slot.slot and slot.name then
+                        out[#out + 1] = slot
+                    end
+                end
+            end
+        end
+    end
+
+    return out
+end
+
 lib.callback.register('crimson_duelwield:list', function(source)
     local src = source
     local cur = gate(src)
     if not cur then return { ok = false, reason = 'need_mainhand' } end
 
-    local ok, slots = pcall(function()
+    local ok, res = pcall(function()
         return exports.ox_inventory:Search(src, 'slots', allowedNames())
     end)
-    if not ok or type(slots) ~= 'table' then return { ok = false, reason = 'nothing' } end
+    if not ok then return { ok = false, reason = 'nothing' } end
 
     local out = {}
-    for i = 1, #slots do
-        local s = slots[i]
-        if type(s) == 'table' and s.slot ~= cur.slot and Config.AllowedWeapons[s.name] == true then
+    for _, s in ipairs(flattenSearch(res)) do
+        if s.slot ~= cur.slot and Config.AllowedWeapons[s.name] == true then
             out[#out + 1] = {
                 slot  = s.slot,
                 name  = s.name,
@@ -122,6 +150,8 @@ lib.callback.register('crimson_duelwield:list', function(source)
             }
         end
     end
+
+    table.sort(out, function(a, b) return a.slot < b.slot end)
 
     return { ok = true, slots = out, activeSlot = active[src] and active[src].slot or nil }
 end)
