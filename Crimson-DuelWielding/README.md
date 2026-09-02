@@ -58,15 +58,24 @@ likely to change:
 | --- | --- | --- |
 | `Config.Keybind` | `'K'` | Key that opens the menu |
 | `Config.Command` | `'dualwield'` | Chat command that does the same |
-| `Config.AllowedWeapons` | pistols | Which weapons may be akimbo'd |
+| `Config.AllowedWeapons` | 23 one-handed guns | Which weapons may be akimbo'd |
 | `Config.AmmoPerOffhandShot` | `1` | Rounds burned from the offhand's own magazine |
 | `Config.OffhandSpread` | `0.35` | Offhand accuracy penalty, in metres |
 | `Config.ShowToOtherPlayers` | `true` | Others can see your second gun |
 | `Config.Attach` | tuned for pistols | Left-hand position and rotation |
 
-Only put **one-handed** weapons in `Config.AllowedWeapons`. The offhand gun is
-attached to the left hand, so a rifle will look wrong. **Both** hands are
-checked against this list: the gun you are holding and the gun you pick.
+`Config.AllowedWeapons` ships with every one-handed firearm on this server
+enabled: 13 pistols, 4 revolvers, 4 machine pistols and micro SMGs, plus the
+flare gun and nail gun. Sprays and fireworks are listed but off.
+
+Only put **one-handed** weapons in it. The offhand gun is attached to the left
+hand, so a rifle will look wrong no matter how the offsets are tuned. **Both**
+hands are checked against this list: the gun you are holding and the gun you
+pick.
+
+A weapon also needs an `ammoname` in `ox_inventory/data/weapons.lua`. Without
+one, ox_inventory never gives it a `metadata.ammo` value, and a gun with no
+ammo can never be chosen as an offhand.
 
 `Config.Keybind` only applies the **first** time a client ever sees the binding.
 Changing it in a later release will not move anyone's existing key.

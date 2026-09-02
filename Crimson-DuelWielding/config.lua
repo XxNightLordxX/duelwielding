@@ -43,30 +43,55 @@ Config.Command = 'dualwield'
 -- own ammo, from its own inventory slot.
 
 Config.AllowedWeapons = {
-    ['WEAPON_PISTOL']        = true,
-    ['WEAPON_PISTOL_MK2']    = true,
-    ['WEAPON_COMBATPISTOL']  = true,
-    ['WEAPON_APPISTOL']      = true,
-    ['WEAPON_PISTOL50']      = true,
-    ['WEAPON_SNSPISTOL']     = true,
-    ['WEAPON_SNSPISTOL_MK2'] = true,
-    ['WEAPON_HEAVYPISTOL']   = true,
-    ['WEAPON_VINTAGEPISTOL'] = true,
-    ['WEAPON_CERAMICPISTOL'] = true,
-    ['WEAPON_PISTOLXM3']     = true,
-    ['WEAPON_MACHINEPISTOL'] = true,
-    ['WEAPON_MINISMG']       = true,
-    ['WEAPON_MICROSMG']      = true,
-    ['WEAPON_TECPISTOL']     = true,
-    ['WEAPON_GADGETPISTOL']  = true,
+    -- Pistols
+    ['WEAPON_PISTOL']         = true,
+    ['WEAPON_PISTOL_MK2']     = true,
+    ['WEAPON_COMBATPISTOL']   = true,
+    ['WEAPON_APPISTOL']       = true,
+    ['WEAPON_PISTOL50']       = true,
+    ['WEAPON_SNSPISTOL']      = true,
+    ['WEAPON_SNSPISTOL_MK2']  = true,
+    ['WEAPON_HEAVYPISTOL']    = true,
+    ['WEAPON_VINTAGEPISTOL']  = true,
+    ['WEAPON_CERAMICPISTOL']  = true,
+    ['WEAPON_PISTOLXM3']      = true,   -- WM 29 Pistol
+    ['WEAPON_GADGETPISTOL']   = true,   -- Perico Pistol
+    ['WEAPON_MARKSMANPISTOL'] = true,
 
-    -- Revolvers. Disabled by default: they look odd akimbo and reload slowly.
-    -- Set any of these to true to allow them.
-    ['WEAPON_REVOLVER']      = false,
-    ['WEAPON_REVOLVER_MK2']  = false,
-    ['WEAPON_DOUBLEACTION']  = false,
-    ['WEAPON_NAVYREVOLVER']  = false,
-    ['WEAPON_MARKSMANPISTOL'] = false,
+    -- Revolvers. Slower, hit harder, and akimbo revolvers look the part.
+    ['WEAPON_REVOLVER']       = true,
+    ['WEAPON_REVOLVER_MK2']   = true,
+    ['WEAPON_DOUBLEACTION']   = true,
+    ['WEAPON_NAVYREVOLVER']   = true,
+
+    -- Machine pistols and micro SMGs. Still a one-handed grip in game.
+    -- These are the strongest thing on this list: high rate of fire doubled.
+    -- Set any of them to false if akimbo feels too strong on your server.
+    ['WEAPON_MACHINEPISTOL']  = true,
+    ['WEAPON_MICROSMG']       = true,
+    ['WEAPON_MINISMG']        = true,
+    ['WEAPON_TECPISTOL']      = true,   -- Tactical SMG
+
+    -- Other one-handed guns you run.
+    ['WEAPON_FLAREGUN']       = true,
+    ['WEAPON_NAILGUN']        = true,
+
+    -- One-handed but not really guns. Off by default; flip any to true if you
+    -- want them. Dual pepper spray is legal, just silly.
+    ['WEAPON_PEPPERSPRAY']     = false,
+    ['WEAPON_PINKPEPPERSPRAY'] = false,
+    ['WEAPON_ACIDSPRAY']       = false,
+    ['WEAPON_SPRAYPAINT']      = false,
+    ['WEAPON_FIREWORKSINGLE']  = false,
+
+    -- Deliberately absent: every rifle, shotgun, SMG proper (WEAPON_SMG,
+    -- WEAPON_ASSAULTSMG, WEAPON_COMBATPDW, WEAPON_GUSENBERG), MG, sniper and
+    -- launcher on your server. They are two-handed, so a second gun welded to
+    -- the left hand looks wrong no matter how the offsets are tuned.
+    --
+    -- Also unusable even if you added them: WEAPON_STUNGUN and WEAPON_RAYPISTOL
+    -- have no ammoname in your weapons.lua, so ox_inventory never gives them a
+    -- metadata.ammo value, and a gun with no ammo can never be picked here.
 }
 
 -- ----------------------------------------------------------------------------
