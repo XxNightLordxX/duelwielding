@@ -16,17 +16,18 @@ Config = {}
 -- ACTIVATION
 -- ----------------------------------------------------------------------------
 
--- Chat command used to toggle akimbo on/off. Set to false to disable the command.
+-- Press this key to open the dual wield menu, which lists the one-handed guns
+-- you are carrying but not currently holding. Pick one and it goes in your left
+-- hand. Players can rebind it in Settings > Key Bindings > FiveM.
+--
+-- NOTE: the default only applies the FIRST time a client ever sees this
+-- binding. Changing it later will not move anyone's existing key.
+Config.Keybind = 'K'
+
+-- Chat command that opens the same menu, and turns akimbo off. Kept as a
+-- fallback so nobody is ever stuck with a gun they cannot put away.
+-- Set to false to remove it.
 Config.Command = 'dualwield'
-
--- Optional keybind. Players rebind it in Settings > Key Bindings > FiveM.
--- Set to false for no default key. 'GRAVE' is the ` / ~ key.
-Config.Keybind = false
-
--- Require the player to actually be carrying TWO of the same weapon.
--- This is the whole cost of dual wielding: you carry (and can lose) two guns.
--- Set to false to let a single weapon be akimbo'd.
-Config.RequireTwoWeapons = true
 
 -- ----------------------------------------------------------------------------
 -- ALLOWED WEAPONS
@@ -35,6 +36,11 @@ Config.RequireTwoWeapons = true
 -- broken, because the offhand prop is attached to the left hand.
 -- Names must match your ox_inventory item names exactly (UPPERCASE).
 -- Enforced server-side.
+--
+-- BOTH hands must be on this list: the gun you are holding, and the gun you
+-- pick for your left hand. They do NOT have to be the same weapon -- a Pistol
+-- in the right hand and a Combat Pistol in the left is fine. Each gun uses its
+-- own ammo, from its own inventory slot.
 
 Config.AllowedWeapons = {
     ['WEAPON_PISTOL']        = true,
@@ -67,8 +73,10 @@ Config.AllowedWeapons = {
 -- BALANCE
 -- ----------------------------------------------------------------------------
 
--- Extra rounds burned per offhand shot. 1 = the offhand costs a real bullet,
--- so akimbo drains your magazine twice as fast. This is the balance lever.
+-- Rounds burned from the OFFHAND gun's own magazine per offhand shot.
+-- The offhand cannot be reloaded while it is in your left hand, so when it runs
+-- dry akimbo switches itself off and you get your hands back. Reload that gun
+-- by equipping it normally, then pick it again.
 -- 0 makes the offhand free (not recommended).
 Config.AmmoPerOffhandShot = 1
 
@@ -112,7 +120,12 @@ Config.Notify = {
     enabled  = true,
     enabled_msg  = 'Dual wielding enabled',
     disabled_msg = 'Dual wielding disabled',
-    need_two     = 'You need two of the same weapon',
     not_allowed  = 'That weapon cannot be dual wielded',
     blocked      = 'You cannot do that right now',
+    nothing      = 'You are not carrying a second gun you can dual wield',
+    need_mainhand = 'Hold a one-handed gun first',
+    in_hand      = 'You are already holding that gun',
+    out_of_ammo  = 'Your offhand gun is empty',
+    menu_title   = 'Dual Wield',
+    menu_stop    = 'Stop dual wielding',
 }

@@ -4,8 +4,9 @@ Simple dual wielding (akimbo) for QBox servers.
 
 Authored by John Allday.
 
-Carry two of the same pistol, run `/dualwield`, and a second gun appears in your
-left hand and fires along with the first one. Run it again to put it away.
+Press a key, pick a gun from the list, and it appears in your left hand and
+fires along with the one in your right. The two guns do not have to match, and
+each one uses its own ammo.
 
 ---
 
@@ -29,14 +30,24 @@ works untouched.
 
 ## Usage
 
+Hold a one-handed gun, press **K**, and a menu lists the other one-handed guns
+you are carrying, with how many rounds each has left. Pick one and it goes in
+your left hand. Press **K** again to put it away.
+
 | Action | How |
 | --- | --- |
-| Toggle akimbo on/off | `/dualwield` |
-| Bind it to a key | Set `Config.Keybind`, then rebind in *Settings > Key Bindings > FiveM* |
+| Open the menu / put it away | **K** (rebind in *Settings > Key Bindings > FiveM*) |
+| Same thing as a command | `/dualwield` |
 
-To dual wield you must be **holding a whitelisted weapon** and **carrying two of
-it** (see `Config.RequireTwoWeapons`). Carrying the second gun is the cost — you
-can be robbed of it like any other weapon.
+The two guns do **not** have to be the same. A Pistol in your right hand and a
+Combat Pistol in your left is fine — both just have to be on the allow-list.
+
+**Each gun uses its own ammo.** The offhand spends rounds from its own inventory
+slot, so you are carrying and can be robbed of a real second magazine.
+
+**The offhand cannot be reloaded while it is in your left hand.** When it runs
+dry, akimbo switches itself off and tells you. To reload it, equip that gun
+normally, reload, then pick it again.
 
 ## Configuration
 
@@ -45,17 +56,20 @@ likely to change:
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `Config.Command` | `'dualwield'` | Chat command name |
-| `Config.Keybind` | `false` | Optional default key |
-| `Config.RequireTwoWeapons` | `true` | Must carry two of the same gun |
+| `Config.Keybind` | `'K'` | Key that opens the menu |
+| `Config.Command` | `'dualwield'` | Chat command that does the same |
 | `Config.AllowedWeapons` | pistols | Which weapons may be akimbo'd |
-| `Config.AmmoPerOffhandShot` | `1` | Ammo burned per offhand shot |
+| `Config.AmmoPerOffhandShot` | `1` | Rounds burned from the offhand's own magazine |
 | `Config.OffhandSpread` | `0.35` | Offhand accuracy penalty, in metres |
 | `Config.ShowToOtherPlayers` | `true` | Others can see your second gun |
 | `Config.Attach` | tuned for pistols | Left-hand position and rotation |
 
 Only put **one-handed** weapons in `Config.AllowedWeapons`. The offhand gun is
-attached to the left hand, so a rifle will look wrong.
+attached to the left hand, so a rifle will look wrong. **Both** hands are
+checked against this list: the gun you are holding and the gun you pick.
+
+`Config.Keybind` only applies the **first** time a client ever sees the binding.
+Changing it in a later release will not move anyone's existing key.
 
 If the gun sits through the palm on a particular model, nudge `Config.Attach`.
 An in-game prop aligner will print exact values for a given model.
@@ -68,6 +82,8 @@ Akimbo is dropped automatically, and the offhand gun removed, when you:
 - get **cuffed**
 - **switch weapon** or holster
 - **enter a vehicle**
+- run the offhand **out of ammo**
+- **drop, sell or move** the offhand gun out of its slot
 
 It does **not** come back on by itself after a revive. Toggle it again when you
 want it. Nobody gets a surprise pistol in their hand after being picked up.
@@ -123,10 +139,16 @@ The server is the authority. The client can only ever ask *"may I akimbo this
 weapon"* and be told yes or no. It never sends damage, coordinates, a weapon
 hash, an ammo count or a player id, because none of those could be trusted.
 
-Every request is validated server-side: the weapon allow-list, that you are
-actually holding that weapon, that you are carrying enough of them, that you are
-not dead, down or cuffed, and a per-player cooldown. Per-player state is cleared
-on disconnect.
+The menu itself is built **by the server** from your own inventory — the client
+never decides what is eligible, it only renders what it is handed and sends back
+one slot number from that list. That slot is then resolved against your own
+inventory only, so it can never reach a stash, trunk, shop or another player.
+
+Every request is validated server-side: the slot is a real integer, it holds a
+whitelisted weapon, it is not the gun already in your hand, it has ammo, and you
+are not dead, down or cuffed. The server also re-checks its own grants on a
+timer and revokes them, so a modified client that simply never reports going
+down does not keep its offhand. Per-player state is cleared on disconnect.
 
 Validation does not stop at the grant. Every teardown the client performs is a
 courtesy, so the server re-checks its own grants every few seconds and revokes

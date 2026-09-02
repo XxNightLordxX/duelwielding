@@ -10,13 +10,16 @@
 local enabled      = false
 local busy         = false   -- an enable is in progress (spans the model load)
 local loopRunning  = false   -- guards against a second firing thread
-local activeHash   = nil
+local activeHash   = nil     -- MAINHAND hash the offhand is paired with
+local offhandSlot  = nil     -- its inventory slot
+local offhandAmmo  = 0       -- rounds left in the offhand's own magazine
+local ammoDirty    = false   -- unflushed ammo spend
 local offhandProp  = nil
 local remoteProps  = {}      -- [serverId] = prop entity
 local remoteWanted = {}      -- [serverId] = weapon name
+local pendingList  = {}      -- last menu payload from the server
 
 local BONE = Config.Attach and Config.Attach.bone or 'IK_L_Hand'
-local chargeAmmo = true      -- disabled at runtime if SetPedAmmo misbehaves
 
 -- ----------------------------------------------------------------------------
 -- Small helpers
@@ -124,9 +127,10 @@ local function cameraDirection()
 end
 
 local function fireOffhand(ped, hash)
-    local ammo = GetAmmoInPedWeapon(ped, hash)
+    -- The offhand gun is not on the ped, so its ammo lives on its inventory
+    -- slot, not in GetAmmoInPedWeapon. Track it here and flush to ox_inventory.
     local cost = Config.AmmoPerOffhandShot or 1
-    if ammo <= cost then return false end
+    if offhandAmmo < cost then return false end
 
     local boneIndex = GetEntityBoneIndexByName(ped, BONE)
     local origin = boneIndex ~= -1
@@ -167,20 +171,22 @@ local function fireOffhand(ped, hash)
         ped             -- entity to ignore
     )
 
-    if chargeAmmo then
-        SetPedAmmo(ped, hash, ammo - cost)
-
-        -- SetPedAmmo's clip-vs-reserve behaviour is not documented. If a write
-        -- ever INCREASES the ammo pool, stop charging rather than hand players
-        -- an ammo duplication ratchet. Worst case is "the offhand is free",
-        -- never "the offhand prints bullets".
-        if GetAmmoInPedWeapon(ped, hash) > ammo then
-            chargeAmmo = false
-            print('[Crimson-DuelWielding] ammo charging disabled: SetPedAmmo increased the ammo pool')
-        end
+    if cost > 0 then
+        offhandAmmo = offhandAmmo - cost
+        ammoDirty = true
     end
 
     return true
+end
+
+-- ox_inventory's own updateWeapon handler takes an explicit slot and only ever
+-- DECREMENTS (a value >= the stored ammo is ignored outright), so this can
+-- never be turned into an ammo duplication ratchet. Flush on a debounce rather
+-- than every shot, the same way ox_inventory does for the equipped weapon.
+local function flushAmmo()
+    if not ammoDirty or not offhandSlot then return end
+    ammoDirty = false
+    TriggerServerEvent('ox_inventory:updateWeapon', 'ammo', math.max(0, offhandAmmo), offhandSlot)
 end
 
 -- ----------------------------------------------------------------------------
@@ -191,9 +197,11 @@ local function disable(silent)
     if not enabled then return end
     enabled = false
 
+    flushAmmo()
+
     deleteProp(offhandProp)
     offhandProp = nil
-    activeHash = nil
+    activeHash, offhandSlot, offhandAmmo = nil, nil, 0
 
     if Config.UseGangAnimation then
         SetWeaponAnimationOverride(cache.ped, `Default`)
@@ -214,6 +222,7 @@ local function runLoop()
 
     local lastAmmo   = GetAmmoInPedWeapon(cache.ped, activeHash)
     local pendingAt  = 0
+    local nextFlush  = 0
     local interval   = (GetWeaponTimeBetweenShots(activeHash) or 0.1) * 1000.0
 
     CreateThread(function()
@@ -239,10 +248,22 @@ local function runLoop()
 
             if pendingAt > 0 and now >= pendingAt then
                 if not IsPedReloading(ped) then
-                    fireOffhand(ped, activeHash)
+                    if not fireOffhand(ped, activeHash) and offhandAmmo < (Config.AmmoPerOffhandShot or 1) then
+                        -- The offhand cannot be reloaded while it is in the left
+                        -- hand, so an empty gun means hands back rather than a
+                        -- dead prop that silently does nothing.
+                        notify('out_of_ammo')
+                        disable(true)
+                        break
+                    end
                 end
                 pendingAt = 0
                 ammo = GetAmmoInPedWeapon(ped, activeHash)
+            end
+
+            if ammoDirty and now >= nextFlush then
+                flushAmmo()
+                nextFlush = now + 1000
             end
 
             lastAmmo = ammo
@@ -262,32 +283,42 @@ end
 -- weapon model streams in -- on first use of a model that can be seconds -- and
 -- during that yield neither `busy` nor `enabled` would stop a second toggle.
 -- That produced an orphaned prop welded to the hand and two firing threads.
-local function doEnable()
-    if isBlocked() then
-        notify('blocked')
-        return
-    end
+-- ----------------------------------------------------------------------------
+-- Menu
+-- ----------------------------------------------------------------------------
+-- The SERVER builds the list from the player's own inventory. The client never
+-- decides what is eligible; it only renders what it is handed and sends back
+-- one slot number from that list.
 
-    local weapon = cache.weapon
-    if not weapon then return end
+local function equip(slot)
+    if busy or enabled then return end
+    busy = true
+    local ok, reason, ammo = lib.callback.await('crimson_duelwield:select', false, slot)
+    busy = false
 
-    local ok, current = pcall(function() return exports.ox_inventory:getCurrentWeapon() end)
-    local name = (ok and type(current) == 'table') and current.name or nil
-    if not name then return end
-
-    local allowed, reason = lib.callback.await('crimson_duelwield:toggle', false, name)
-    if not allowed then
+    if not ok then
         notify(reason or 'blocked')
         return
     end
 
     -- The world can have moved on during the round trip.
-    if enabled or isBlocked() or cache.weapon ~= weapon then
+    local weapon = cache.weapon
+    if enabled or isBlocked() or not weapon then
         TriggerServerEvent('crimson_duelwield:stop')
         return
     end
 
-    local prop = createOffhandProp(cache.ped, name)
+    local list = pendingList
+    local picked
+    for i = 1, #list do
+        if list[i].slot == slot then picked = list[i] break end
+    end
+    if not picked then
+        TriggerServerEvent('crimson_duelwield:stop')
+        return
+    end
+
+    local prop = createOffhandProp(cache.ped, picked.name)
     if not prop then
         -- An invisible offhand that still shoots looks exactly like a cheat.
         -- Fail closed instead.
@@ -298,6 +329,9 @@ local function doEnable()
 
     enabled     = true
     activeHash  = weapon
+    offhandSlot = slot
+    offhandAmmo = tonumber(ammo) or 0
+    ammoDirty   = false
     offhandProp = prop
 
     if Config.UseGangAnimation then
@@ -308,7 +342,7 @@ local function doEnable()
     runLoop()
 end
 
-local function toggle()
+local function openMenu()
     if busy then return end
 
     if enabled then
@@ -316,22 +350,55 @@ local function toggle()
         return
     end
 
+    if isBlocked() then
+        notify('blocked')
+        return
+    end
+
     busy = true
-    local ok, err = pcall(doEnable)
+    local res = lib.callback.await('crimson_duelwield:list', false)
     busy = false
 
-    if not ok then
-        -- Never strand a server-side grant behind a client error.
-        TriggerServerEvent('crimson_duelwield:stop')
-        print('[Crimson-DuelWielding] enable failed: ' .. tostring(err))
+    if type(res) ~= 'table' or not res.ok then
+        notify((type(res) == 'table' and res.reason) or 'blocked')
+        return
     end
+
+    local slots = res.slots or {}
+    if #slots == 0 then
+        notify('nothing')
+        return
+    end
+
+    pendingList = slots
+
+    local options = {}
+    for i = 1, #slots do
+        local s = slots[i]
+        options[#options + 1] = {
+            title       = s.label,
+            description = ('%d rounds'):format(s.ammo or 0),
+            disabled    = (s.ammo or 0) < 1,
+            onSelect    = function() equip(s.slot) end,
+        }
+    end
+
+    lib.registerContext({
+        id      = 'crimson_duelwield_menu',
+        title   = (Config.Notify and Config.Notify.menu_title) or 'Dual Wield',
+        options = options,
+    })
+    lib.showContext('crimson_duelwield_menu')
+end
+
+RegisterCommand('crimson_duelwield_menu', openMenu, false)
+
+if Config.Keybind then
+    RegisterKeyMapping('crimson_duelwield_menu', 'Dual wield menu', 'keyboard', Config.Keybind)
 end
 
 if Config.Command then
-    RegisterCommand(Config.Command, toggle, false)
-    if Config.Keybind then
-        RegisterKeyMapping(Config.Command, 'Toggle dual wielding', 'keyboard', Config.Keybind)
-    end
+    RegisterCommand(Config.Command, openMenu, false)
 end
 
 -- ----------------------------------------------------------------------------

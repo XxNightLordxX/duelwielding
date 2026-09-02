@@ -2,31 +2,18 @@
 --                          CRIMSON - DUEL WIELDING
 --                            Authored by John Allday
 -- ============================================================================
--- SERVER. This is the authority. The client may only ever ask "may I akimbo
--- this weapon" and is told yes or no. It never sends damage, coordinates, a
--- weapon hash, an ammo count or a player id, because none of those would be
--- trustworthy.
+-- SERVER. This is the authority.
+--
+-- The client never names a weapon. It asks "what may I dual wield", gets a list
+-- the SERVER built from the player's own inventory, and sends back one slot
+-- number from it. Damage, coordinates, weapon hashes, ammo counts and player
+-- ids are never accepted from a client, because none of them could be trusted.
 -- ============================================================================
 
-local activeWeapon = {}   -- [src] = weapon name currently akimbo
-local lastToggle   = {}   -- [src] = GetGameTimer() of last toggle
+local active     = {}   -- [src] = { name = string, slot = number }
+local lastAction = {}   -- [src] = GetGameTimer() of last state change
 
 local COOLDOWN_MS = math.floor((Config.ToggleCooldown or 1.0) * 1000)
-local MAX_NAME_LEN = 48
-
--- ----------------------------------------------------------------------------
--- Input scrubbing
--- ----------------------------------------------------------------------------
--- A client can send tables, multi-megabyte strings, NaN, nil, or the wrong
--- number of arguments. Bound the length BEFORE doing any other string work,
--- and never recurse into a client-supplied table.
-
-local function scrubWeaponName(v)
-    if type(v) ~= 'string' then return nil end
-    if #v == 0 or #v > MAX_NAME_LEN then return nil end
-    if v:find('[^%w_]') then return nil end     -- charset, so it can never be a Lua pattern
-    return v:upper()
-end
 
 -- ----------------------------------------------------------------------------
 -- Player state
@@ -61,86 +48,185 @@ local function isBlocked(src, meta)
     return false
 end
 
--- Confirm the player is really holding this weapon, and really owns enough of
--- them. Derived from ox_inventory server-side; the client's claim is ignored.
-local function ownsWeapon(src, name)
-    local ok, current = pcall(function() return exports.ox_inventory:GetCurrentWeapon(src) end)
-    if not ok or type(current) ~= 'table' then return false, 'blocked' end
-    if current.name ~= name then return false, 'blocked' end
+local function currentWeapon(src)
+    local ok, cur = pcall(function() return exports.ox_inventory:GetCurrentWeapon(src) end)
+    if not ok or type(cur) ~= 'table' then return nil end
+    return cur
+end
 
-    if Config.RequireTwoWeapons then
-        local ok2, count = pcall(function() return exports.ox_inventory:Search(src, 'count', name) end)
-        if not ok2 or type(count) ~= 'number' or count < 2 then
-            return false, 'need_two'
-        end
+local function allowedNames()
+    local names = {}
+    for name, on in pairs(Config.AllowedWeapons) do
+        if on == true then names[#names + 1] = name end
     end
-
-    return true
+    return names
 end
 
 -- ----------------------------------------------------------------------------
 -- Sync. The SERVER is the only writer of this state bag, so other clients can
--- trust it for rendering. A client writing its own bag would not replicate the
--- key we read here.
+-- trust its value for rendering.
 -- ----------------------------------------------------------------------------
 
-local function setAkimbo(src, name)
-    activeWeapon[src] = name
+local function setOffhand(src, name, slot)
+    active[src] = name and { name = name, slot = slot } or nil
     Player(src).state:set('crimsonDuelWield', name or false, true)
 end
 
+local function clear(src)
+    if active[src] then setOffhand(src, nil) end
+end
+
 -- ----------------------------------------------------------------------------
--- The single client-facing surface.
--- Checks are ordered cheapest-and-most-rejecting first, so that flooding this
--- callback costs the server as little as possible.
+-- Shared gate for both callbacks. Cheapest and most-rejecting checks first, so
+-- flooding either surface costs the server as little as possible.
 -- ----------------------------------------------------------------------------
 
-lib.callback.register('crimson_duelwield:toggle', function(source, weaponName)
-    local src = source          -- captured before any yield; never read `source` again
-
-    if not src or not DoesPlayerExist(src) then return false end
-
-    -- Already on? Turn it off. This returns FALSE deliberately: the reply means
-    -- "you are not dual wielding now". Returning true here would read to the
-    -- client as permission to enable, and it would enable while the server had
-    -- just switched akimbo off.
-    if activeWeapon[src] then
-        setAkimbo(src, nil)
-        lastToggle[src] = GetGameTimer()
-        return false, 'disabled_msg'
-    end
-
-    local now  = GetGameTimer()
-    local last = lastToggle[src]
-    if last and (now - last) < COOLDOWN_MS then return false end
-    lastToggle[src] = now
-
-    local name = scrubWeaponName(weaponName)
-    if not name then return false end
-
-    if Config.AllowedWeapons[name] ~= true then return false, 'not_allowed' end
+local function gate(src)
+    if not src or not DoesPlayerExist(src) then return nil end
 
     local meta = getMetadata(src)
-    if not meta then return false end               -- player not loaded yet
-    if isBlocked(src, meta) then return false, 'blocked' end
+    if not meta then return nil end                 -- player not loaded yet
+    if isBlocked(src, meta) then return nil end
 
-    local allowed, reason = ownsWeapon(src, name)
-    if not allowed then return false, reason end
+    local cur = currentWeapon(src)
+    if not cur or Config.AllowedWeapons[cur.name] ~= true then return nil end
 
-    setAkimbo(src, name)
-    return true, 'enabled_msg'
+    return cur
+end
+
+-- ----------------------------------------------------------------------------
+-- READ-ONLY: what can this player dual wield right now?
+-- Returns only the caller's own inventory, and only whitelisted one-handed guns
+-- that are not the gun already in their hand.
+-- ----------------------------------------------------------------------------
+
+lib.callback.register('crimson_duelwield:list', function(source)
+    local src = source
+    local cur = gate(src)
+    if not cur then return { ok = false, reason = 'need_mainhand' } end
+
+    local ok, slots = pcall(function()
+        return exports.ox_inventory:Search(src, 'slots', allowedNames())
+    end)
+    if not ok or type(slots) ~= 'table' then return { ok = false, reason = 'nothing' } end
+
+    local out = {}
+    for i = 1, #slots do
+        local s = slots[i]
+        if type(s) == 'table' and s.slot ~= cur.slot and Config.AllowedWeapons[s.name] == true then
+            out[#out + 1] = {
+                slot  = s.slot,
+                name  = s.name,
+                label = (s.label or s.name),
+                ammo  = (s.metadata and s.metadata.ammo) or 0,
+            }
+        end
+    end
+
+    return { ok = true, slots = out, activeSlot = active[src] and active[src].slot or nil }
 end)
 
 -- ----------------------------------------------------------------------------
--- Forced shutdown, used by the client when it detects death, downed, cuffed,
--- a weapon switch, or a vehicle. Carries no arguments at all, so there is
--- nothing here for a client to lie about.
+-- Pick a slot as the offhand. The ONLY value taken from the client is a slot
+-- number, and it is resolved against the caller's own inventory.
+-- ----------------------------------------------------------------------------
+
+lib.callback.register('crimson_duelwield:select', function(source, slot)
+    local src = source
+    if not src or not DoesPlayerExist(src) then return false end
+
+    local now  = GetGameTimer()
+    local last = lastAction[src]
+    if last and (now - last) < COOLDOWN_MS then return false end
+    lastAction[src] = now
+
+    -- Slot must be a real positive integer. A table, float, string, negative or
+    -- absurd value never reaches ox_inventory.
+    if type(slot) ~= 'number' or slot ~= math.floor(slot) or slot < 1 or slot > 500 then
+        return false
+    end
+
+    local cur = gate(src)
+    if not cur then return false, 'need_mainhand' end
+    if slot == cur.slot then return false, 'in_hand' end
+
+    -- Resolved from the PLAYER's inventory only. A slot id cannot reach a
+    -- stash, trunk, shop or another player's inventory through this path.
+    local ok, item = pcall(function() return exports.ox_inventory:GetSlot(src, slot) end)
+    if not ok or type(item) ~= 'table' or not item.name then return false end
+    if Config.AllowedWeapons[item.name] ~= true then return false, 'not_allowed' end
+    if (item.count or 0) < 1 then return false end
+
+    local ammo = (item.metadata and item.metadata.ammo) or 0
+    if ammo < 1 then return false, 'out_of_ammo' end
+
+    setOffhand(src, item.name, slot)
+    return true, 'enabled_msg', ammo
+end)
+
+-- ----------------------------------------------------------------------------
+-- Stop. Carries no arguments, so there is nothing here for a client to lie
+-- about, and it can only ever affect the caller.
 -- ----------------------------------------------------------------------------
 
 RegisterNetEvent('crimson_duelwield:stop', function()
     local src = source
     if not src or not DoesPlayerExist(src) then return end
-    if activeWeapon[src] then setAkimbo(src, nil) end
+    clear(src)
+end)
+
+-- ----------------------------------------------------------------------------
+-- The server owns the grant, so the server revokes it. A modified client that
+-- simply never reports going down, holstering, or dropping the offhand gun
+-- would otherwise keep its state bag forever.
+-- ----------------------------------------------------------------------------
+
+CreateThread(function()
+    while true do
+        Wait(10000)
+
+        local watched = {}
+        for src in pairs(active) do watched[#watched + 1] = src end
+
+        for i = 1, #watched do
+            local src = watched[i]
+            local a = active[src]
+
+            if a then
+                local revoke = false
+
+                if not DoesPlayerExist(src) then
+                    revoke = true
+                else
+                    local meta = getMetadata(src)
+                    if not meta or isBlocked(src, meta) then
+                        revoke = true
+                    else
+                        local cur = currentWeapon(src)
+                        if not cur or Config.AllowedWeapons[cur.name] ~= true or cur.slot == a.slot then
+                            revoke = true
+                        else
+                            -- The offhand gun must still be in the slot it was
+                            -- claimed from: it can be dropped, sold or moved.
+                            local ok, item = pcall(function() return exports.ox_inventory:GetSlot(src, a.slot) end)
+                            if not ok or type(item) ~= 'table' or item.name ~= a.name then
+                                revoke = true
+                            end
+                        end
+                    end
+                end
+
+                if revoke then
+                    if DoesPlayerExist(src) then
+                        clear(src)
+                        TriggerClientEvent('crimson_duelwield:revoke', src)
+                    else
+                        active[src] = nil
+                    end
+                end
+            end
+        end
+    end
 end)
 
 -- ----------------------------------------------------------------------------
@@ -150,58 +236,20 @@ end)
 
 AddEventHandler('playerDropped', function()
     local src = source
-    activeWeapon[src] = nil
-    lastToggle[src]   = nil
+    active[src]     = nil
+    lastAction[src] = nil
 end)
 
 CreateThread(function()
     while true do
         Wait(600000)
-        for src in pairs(lastToggle) do
+        local seen = {}
+        for src in pairs(lastAction) do seen[#seen + 1] = src end
+        for i = 1, #seen do
+            local src = seen[i]
             if not DoesPlayerExist(src) then
-                activeWeapon[src] = nil
-                lastToggle[src]   = nil
-            end
-        end
-    end
-end)
-
--- ----------------------------------------------------------------------------
--- Revalidation.
--- ----------------------------------------------------------------------------
--- Every teardown path above is client-initiated, so a modified client that
--- simply never sends the stop event would keep its grant -- and the replicated
--- bag that renders its offhand gun on every other player's screen -- through
--- death, laststand and cuffing. The server therefore re-checks its own grants.
-
-local function revoke(src)
-    setAkimbo(src, nil)
-    TriggerClientEvent('crimson_duelwield:revoke', src)
-end
-
-CreateThread(function()
-    while true do
-        Wait(5000)
-
-        -- Snapshot the keys: clearing entries while iterating the live table is
-        -- undefined behaviour in Lua and would wedge this loop permanently.
-        local ids = {}
-        for src in pairs(activeWeapon) do ids[#ids + 1] = src end
-
-        for i = 1, #ids do
-            local src = ids[i]
-            local name = activeWeapon[src]      -- may have been cleared mid-sweep
-
-            if name then
-                if not DoesPlayerExist(src) then
-                    activeWeapon[src] = nil
-                    lastToggle[src]   = nil
-                else
-                    local meta = getMetadata(src)
-                    if not meta or isBlocked(src, meta) or not ownsWeapon(src, name) then
-                        revoke(src)
-                    end
-                end
+                active[src]     = nil
+                lastAction[src] = nil
             end
         end
     end
@@ -213,7 +261,7 @@ end)
 -- out.
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
-    for src in pairs(activeWeapon) do
+    for src in pairs(active) do
         if DoesPlayerExist(src) then
             Player(src).state:set('crimsonDuelWield', false, true)
         end
@@ -222,5 +270,10 @@ end)
 
 -- Read-only helper for other resources (exports are not reachable from clients).
 exports('IsDualWielding', function(playerId)
-    return activeWeapon[playerId] ~= nil
+    return active[playerId] ~= nil
+end)
+
+exports('GetOffhandWeapon', function(playerId)
+    local a = active[playerId]
+    return a and a.name or nil
 end)
