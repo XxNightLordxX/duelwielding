@@ -100,6 +100,23 @@ is off the resource costs nothing.
 Every client draws its own copy, so no networked entities are created and there
 is nothing for an entity-spam check to trip on.
 
+## For other resources
+
+The server exposes a read-only export:
+
+```lua
+-- Note the bracket syntax. The hyphen in the resource name makes
+-- exports.Crimson-DuelWielding:... a Lua syntax error.
+local akimbo = exports['Crimson-DuelWielding']:IsDualWielding(playerId)
+```
+
+Each akimbo player also carries a replicated state bag, written only by the
+server, which is what draws the second gun on other players' screens:
+
+```lua
+Player(playerId).state.crimsonDuelWield  -- weapon name, or false
+```
+
 ## Security
 
 The server is the authority. The client can only ever ask *"may I akimbo this

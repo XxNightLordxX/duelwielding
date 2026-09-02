@@ -163,6 +163,19 @@ CreateThread(function()
     end
 end)
 
+-- A replicated state bag outlives this resource. If the server stops with
+-- players still akimbo, their bag keeps saying so, and change handlers only
+-- fire on change -- so the value would never be corrected. Clear it on the way
+-- out.
+AddEventHandler('onResourceStop', function(resource)
+    if resource ~= GetCurrentResourceName() then return end
+    for src in pairs(activeWeapon) do
+        if DoesPlayerExist(src) then
+            Player(src).state:set('crimsonDuelWield', false, true)
+        end
+    end
+end)
+
 -- Read-only helper for other resources (exports are not reachable from clients).
 exports('IsDualWielding', function(playerId)
     return activeWeapon[playerId] ~= nil

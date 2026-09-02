@@ -15,6 +15,7 @@ local remoteProps  = {}      -- [serverId] = prop entity
 local remoteWanted = {}      -- [serverId] = weapon name
 
 local BONE = Config.Attach and Config.Attach.bone or 'IK_L_Hand'
+local chargeAmmo = true      -- disabled at runtime if SetPedAmmo misbehaves
 
 -- ----------------------------------------------------------------------------
 -- Small helpers
@@ -46,7 +47,15 @@ local function createOffhandProp(ped, weaponName)
 
     local model = GetWeapontypeModel(joaat(weaponName))
     if not model or model == 0 then return nil end
-    if not lib.requestModel(model, 5000) then return nil end
+
+    -- lib.requestModel does NOT return false on timeout: it goes through
+    -- lib.streamingRequest -> lib.waitFor, which ends in error(). Unguarded, a
+    -- model that fails to stream would raise straight out of the command
+    -- handler while the server had already granted, leaving the player's state
+    -- bag saying "dual wielding" with no way to turn it off.
+    local ok, res = pcall(lib.requestModel, model, 5000)
+    if not ok or res == false then return nil end
+    if not HasModelLoaded(model) then return nil end
 
     local coords = GetEntityCoords(ped)
     local prop = CreateObject(model, coords.x, coords.y, coords.z, false, false, false)
@@ -156,7 +165,19 @@ local function fireOffhand(ped, hash)
         ped             -- entity to ignore
     )
 
-    SetPedAmmo(ped, hash, ammo - cost)
+    if chargeAmmo then
+        SetPedAmmo(ped, hash, ammo - cost)
+
+        -- SetPedAmmo's clip-vs-reserve behaviour is not documented. If a write
+        -- ever INCREASES the ammo pool, stop charging rather than hand players
+        -- an ammo duplication ratchet. Worst case is "the offhand is free",
+        -- never "the offhand prints bullets".
+        if GetAmmoInPedWeapon(ped, hash) > ammo then
+            chargeAmmo = false
+            print('[Crimson-DuelWielding] ammo charging disabled: SetPedAmmo increased the ammo pool')
+        end
+    end
+
     return true
 end
 
