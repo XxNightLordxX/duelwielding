@@ -100,11 +100,14 @@ lib.callback.register('crimson_duelwield:toggle', function(source, weaponName)
 
     if not src or not DoesPlayerExist(src) then return false end
 
-    -- Already on? Turning OFF is always allowed and needs no further checks.
+    -- Already on? Turn it off. This returns FALSE deliberately: the reply means
+    -- "you are not dual wielding now". Returning true here would read to the
+    -- client as permission to enable, and it would enable while the server had
+    -- just switched akimbo off.
     if activeWeapon[src] then
         setAkimbo(src, nil)
         lastToggle[src] = GetGameTimer()
-        return true, 'disabled_msg'
+        return false, 'disabled_msg'
     end
 
     local now  = GetGameTimer()
@@ -158,6 +161,47 @@ CreateThread(function()
             if not DoesPlayerExist(src) then
                 activeWeapon[src] = nil
                 lastToggle[src]   = nil
+            end
+        end
+    end
+end)
+
+-- ----------------------------------------------------------------------------
+-- Revalidation.
+-- ----------------------------------------------------------------------------
+-- Every teardown path above is client-initiated, so a modified client that
+-- simply never sends the stop event would keep its grant -- and the replicated
+-- bag that renders its offhand gun on every other player's screen -- through
+-- death, laststand and cuffing. The server therefore re-checks its own grants.
+
+local function revoke(src)
+    setAkimbo(src, nil)
+    TriggerClientEvent('crimson_duelwield:revoke', src)
+end
+
+CreateThread(function()
+    while true do
+        Wait(5000)
+
+        -- Snapshot the keys: clearing entries while iterating the live table is
+        -- undefined behaviour in Lua and would wedge this loop permanently.
+        local ids = {}
+        for src in pairs(activeWeapon) do ids[#ids + 1] = src end
+
+        for i = 1, #ids do
+            local src = ids[i]
+            local name = activeWeapon[src]      -- may have been cleared mid-sweep
+
+            if name then
+                if not DoesPlayerExist(src) then
+                    activeWeapon[src] = nil
+                    lastToggle[src]   = nil
+                else
+                    local meta = getMetadata(src)
+                    if not meta or isBlocked(src, meta) or not ownsWeapon(src, name) then
+                        revoke(src)
+                    end
+                end
             end
         end
     end

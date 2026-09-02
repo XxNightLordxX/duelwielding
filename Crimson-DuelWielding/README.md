@@ -128,6 +128,17 @@ actually holding that weapon, that you are carrying enough of them, that you are
 not dead, down or cuffed, and a per-player cooldown. Per-player state is cleared
 on disconnect.
 
+Validation does not stop at the grant. Every teardown the client performs is a
+courtesy, so the server re-checks its own grants every few seconds and revokes
+any player who has since died, gone down, been cuffed, or lost the second gun.
+A modified client that simply never reports going down still loses the offhand,
+because the state bag that draws it on everyone else's screen is written only by
+the server.
+
+Cuffing is judged on the server for the same reason. The client does not test
+for it at all: on this stack the only real cuff signal is player metadata, and
+guessing at client-side names would produce a check that silently never fires.
+
 Note that `config.lua` is a shared script, so the server holds its own copy of
 the allow-list. Editing a client's copy changes nothing.
 

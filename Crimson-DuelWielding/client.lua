@@ -8,7 +8,8 @@
 -- ============================================================================
 
 local enabled      = false
-local busy         = false   -- a toggle is mid-flight to the server
+local busy         = false   -- an enable is in progress (spans the model load)
+local loopRunning  = false   -- guards against a second firing thread
 local activeHash   = nil
 local offhandProp  = nil
 local remoteProps  = {}      -- [serverId] = prop entity
@@ -102,9 +103,10 @@ end
 local function isBlocked()
     if isDownOrDead() then return true end
 
-    local st = LocalPlayer.state
-    if st.isCuffed or st.handcuffed then return true end
-
+    -- Cuffing is deliberately NOT tested here. On this stack the only real cuff
+    -- signal is player metadata (ishandcuffed), which lives on the server; the
+    -- client state-bag names that look right are not written by anything. The
+    -- server checks it at toggle time and revokes via crimson_duelwield:revoke.
     if cache.vehicle or IsPedInAnyVehicle(cache.ped, true) then return true end
 
     return false
@@ -207,6 +209,9 @@ end
 -- ----------------------------------------------------------------------------
 
 local function runLoop()
+    if loopRunning then return end
+    loopRunning = true
+
     local lastAmmo   = GetAmmoInPedWeapon(cache.ped, activeHash)
     local pendingAt  = 0
     local interval   = (GetWeaponTimeBetweenShots(activeHash) or 0.1) * 1000.0
@@ -243,6 +248,8 @@ local function runLoop()
             lastAmmo = ammo
             Wait(0)
         end
+
+        loopRunning = false
     end)
 end
 
@@ -250,18 +257,12 @@ end
 -- Toggle
 -- ----------------------------------------------------------------------------
 
-local function toggle()
-    -- The callback below yields for a server round trip. Without this guard,
-    -- spamming the command starts a second enable while the first is still in
-    -- flight: the first prop handle is overwritten and leaks in the player's
-    -- hand, and two firing loops run at once, doubling the offhand rate.
-    if busy then return end
-
-    if enabled then
-        disable()
-        return
-    end
-
+-- Everything between the server round trip and `enabled = true` must run under
+-- the busy guard. createOffhandProp yields inside lib.requestModel while a
+-- weapon model streams in -- on first use of a model that can be seconds -- and
+-- during that yield neither `busy` nor `enabled` would stop a second toggle.
+-- That produced an orphaned prop welded to the hand and two firing threads.
+local function doEnable()
     if isBlocked() then
         notify('blocked')
         return
@@ -274,10 +275,7 @@ local function toggle()
     local name = (ok and type(current) == 'table') and current.name or nil
     if not name then return end
 
-    busy = true
     local allowed, reason = lib.callback.await('crimson_duelwield:toggle', false, name)
-    busy = false
-
     if not allowed then
         notify(reason or 'blocked')
         return
@@ -310,6 +308,25 @@ local function toggle()
     runLoop()
 end
 
+local function toggle()
+    if busy then return end
+
+    if enabled then
+        disable()
+        return
+    end
+
+    busy = true
+    local ok, err = pcall(doEnable)
+    busy = false
+
+    if not ok then
+        -- Never strand a server-side grant behind a client error.
+        TriggerServerEvent('crimson_duelwield:stop')
+        print('[Crimson-DuelWielding] enable failed: ' .. tostring(err))
+    end
+end
+
 if Config.Command then
     RegisterCommand(Config.Command, toggle, false)
     if Config.Keybind then
@@ -340,10 +357,23 @@ CreateThread(function()
     end
 end)
 
+-- The server revokes when it sees the player dead, downed, cuffed, or no longer
+-- carrying the weapon. It is the only authority on those, so obey unconditionally.
+RegisterNetEvent('crimson_duelwield:revoke', function()
+    if source == '' then return end     -- locally injected TriggerEvent
+    disable(true)
+end)
+
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= cache.resource then return end
     deleteProp(offhandProp)
     for _, prop in pairs(remoteProps) do deleteProp(prop) end
+    -- SetWeaponAnimationOverride is ped state, not a resource-owned entity, so
+    -- FiveM's own cleanup will not revert it. Restore it explicitly or the
+    -- player keeps the one-handed grip until they rejoin.
+    if Config.UseGangAnimation then
+        SetWeaponAnimationOverride(PlayerPedId(), `Default`)
+    end
 end)
 
 -- ----------------------------------------------------------------------------
@@ -358,7 +388,11 @@ if Config.ShowToOtherPlayers then
         if not serverId then return end
         if serverId == GetPlayerServerId(PlayerId()) then return end
 
-        remoteWanted[serverId] = (type(value) == 'string' and value ~= '') and value or nil
+        -- A client can write its own replicated player state bag, so this value
+        -- is not inherently trustworthy. Render only allow-listed weapons, so
+        -- the worst a spoofed bag can do is show a pistol that is not there.
+        local ok = type(value) == 'string' and Config.AllowedWeapons[value] == true
+        remoteWanted[serverId] = ok and value or nil
 
         if not remoteWanted[serverId] and remoteProps[serverId] then
             deleteProp(remoteProps[serverId])

@@ -54,7 +54,8 @@ Config.AllowedWeapons = {
     ['WEAPON_TECPISTOL']     = true,
     ['WEAPON_GADGETPISTOL']  = true,
 
-    -- Revolvers. Allowed, but they look odd akimbo with a slow reload.
+    -- Revolvers. Disabled by default: they look odd akimbo and reload slowly.
+    -- Set any of these to true to allow them.
     ['WEAPON_REVOLVER']      = false,
     ['WEAPON_REVOLVER_MK2']  = false,
     ['WEAPON_DOUBLEACTION']  = false,
