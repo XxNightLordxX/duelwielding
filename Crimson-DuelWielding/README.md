@@ -80,8 +80,31 @@ ammo can never be chosen as an offhand.
 `Config.Keybind` only applies the **first** time a client ever sees the binding.
 Changing it in a later release will not move anyone's existing key.
 
-If the gun sits through the palm on a particular model, nudge `Config.Attach`.
-An in-game prop aligner will print exact values for a given model.
+### Getting the gun to sit right in the hand
+
+Hand offsets depend on the weapon model and cannot be worked out on paper, so
+there is a tuner:
+
+1. Set `Config.Debug = true` and restart the resource.
+2. Dual wield something, then run `/dwtune`.
+3. Drag the gun into place:
+
+| Keys | |
+| --- | --- |
+| Arrow keys | left/right, forward/back |
+| Q / E | up / down |
+| R / F | pitch |
+| Z / C | roll |
+| G / B | yaw |
+| **L** | flip the barrel 180 (the usual "holding it backwards" fix) |
+| Enter | print the values |
+
+4. `/dwtune` again to finish. It prints a `Config.Attach` block to the F8
+   console, ready to paste. Set `Config.Debug = false` when you are done.
+
+If the two hands come together and the offhand gun follows the mainhand, the
+one-handed animation override has been reset by another resource. Check that
+`Config.UseGangAnimation` is `true` and lower `Config.AnimationRefresh`.
 
 ## When it turns itself off
 

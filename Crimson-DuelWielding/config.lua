@@ -124,9 +124,21 @@ Config.ToggleCooldown = 1.0
 -- networked entity), the same approach crimson-backweapons uses.
 Config.ShowToOtherPlayers = true
 
--- One-handed "gangster" grip. Makes the mainhand read as akimbo rather than a
--- normal two-handed stance. Set to false to keep the default animation.
+-- One-handed grip. Without this the game pulls your left hand across to support
+-- the gun in your right, which drags the offhand gun with it and puts both
+-- hands together. Set to false only if you want the default two-handed stance.
 Config.UseGangAnimation = true
+
+-- Which one-handed style to use. 'Gang1H' is the sideways gangster grip and is
+-- the one that actually reads as akimbo. Other valid values, if you want to
+-- experiment: 'Default', 'Franklin', 'Michael', 'Trevor', 'Hillbilly',
+-- 'MP_F_Freemode', 'Ballistic'.
+Config.AnimationStyle = 'Gang1H'
+
+-- Re-apply the style this often, in ms, while dual wielding. Other resources
+-- and weapon switches reset the ped's animation override, which is what makes
+-- the hands snap back together mid-fight. 0 disables re-applying.
+Config.AnimationRefresh = 1000
 
 -- Left-hand attachment. Tuned for standard pistol models.
 -- If the gun sits through the palm, nudge these. A prop aligner such as
@@ -134,8 +146,13 @@ Config.UseGangAnimation = true
 Config.Attach = {
     bone = 'IK_L_Hand',
     pos  = vec3(0.12, 0.03, 0.02),
-    rot  = vec3(-75.0, 5.0, 175.0),
+    rot  = vec3(-75.0, 5.0, -5.0),
 }
+
+-- Set true, restart, and use /dwtune while dual wielding to drag the offhand
+-- gun into place with the keyboard. It prints a ready-to-paste Config.Attach
+-- block. This is far faster than editing numbers and restarting each time.
+Config.Debug = false
 
 -- ----------------------------------------------------------------------------
 -- NOTIFICATIONS
